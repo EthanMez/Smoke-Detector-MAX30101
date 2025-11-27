@@ -38,6 +38,7 @@ class SmokeDetectorMonitor:
         self.means = {'R': None, 'G': None, 'IR': None}
         self.sds = {'R': None, 'G': None, 'IR': None}
         self.last_calculation_time = time.time()
+        self.restart_time = time.time() + 10*3600  # Restart every 10 hours
         
         # Load settings
         self.settings = self.load_settings()
@@ -149,10 +150,14 @@ class SmokeDetectorMonitor:
             return {}
             
         try:
-            input1 = self.arduino_serial.readline().decode().strip()
-            inputs = input1.split(';')
+            arduino_readout = self.arduino_serial.readline().decode().strip()
+
+            if any(x not in arduino_readout for x in ['R', 'G', 'IR']):
+                raise ValueError("Incomplete data from Arduino")
+
+            outputs = arduino_readout.split(';')
             values = {}
-            for input_str in inputs:
+            for input_str in outputs:
                 value = input_str.split(":")
                 if len(value) == 2 and value[0] in ['R', 'G', 'IR']:
                     try:
@@ -161,14 +166,9 @@ class SmokeDetectorMonitor:
                             values[value[0]] = val
                     except ValueError:
                         continue
-            ### REMOVE RAW ###
-            return values, input1
-            ### REMOVE RAW ###
+            return values
         except Exception as e:
-            ### REMOVE RAW ###
-            #input1 = self.arduino_serial.readline().decode().strip()
-            logging.error(f"Error reading from Arduino: {e}, RAW: {input1}")
-            ### REMOVE RAW ###
+            logging.error(f"Error reading from Arduino: {e}")
             return {}
     
     def save_reading(self, values):
@@ -285,9 +285,7 @@ class SmokeDetectorMonitor:
         conn.commit()
         conn.close()
     
-    ### REMOVE RAW ###
-    def check_alerts(self, values, raw):
-    ### REMOVE RAW ###
+    def check_alerts(self, values):
         """Check for alert conditions"""
         if None in self.means.values() or None in self.sds.values():
             return
@@ -310,9 +308,8 @@ class SmokeDetectorMonitor:
                              f'IR values are {z_scores.get("IR", np.nan):.2f} standard deviations from the mean.')
 
             self.send_email(warning_message, 'SMOKE LEVEL WARNING', priority='2')
-            ### REMOVE RAW ###
-            logging.warning(f"SMOKE WARNING: {values} | Z-scores: {z_scores} | RAW: {raw}")
-            ### REMOVE RAW ###
+
+            logging.warning(f"SMOKE WARNING: {values} | Z-scores: {z_scores}")
         
         # CRITICAL - all sensors triggered
         if all(conditions.get(key, False) for key in ['R', 'G', 'IR']):
@@ -332,9 +329,7 @@ class SmokeDetectorMonitor:
                 # Stop monitoring after shutdown
                 self.update_setting('monitoring_active', 'false')
 
-            ### REMOVE RAW ###
-            logging.critical(f"CRITICAL SMOKE ALERT: {values} | Z-scores: {z_scores} | RAW: {raw}")
-            ### REMOVE RAW ###
+            logging.critical(f"CRITICAL SMOKE ALERT: {values} | Z-scores: {z_scores}")
 
     def run(self):
         """Main monitoring loop"""
@@ -348,13 +343,17 @@ class SmokeDetectorMonitor:
         
         try:
             while self.settings.get('monitoring_active') == 'true':
+                
+                # Check for scheduled restart
+                if time.time() >= self.restart_time:
+                    logging.info("Restarting monitoring script to prevent error excess.")
+                    return
+
                 # Reload settings periodically
                 self.settings = self.load_settings()
                 
                 # Read values
-                ### REMOVE RAW ###
-                values, raw = self.read_smoke_detector()
-                ### REMOVE RAW ###
+                values = self.read_smoke_detector()
                 
                 if len(values) > 0:
                     # Save reading
@@ -374,9 +373,7 @@ class SmokeDetectorMonitor:
                     
                     # Check for alerts (skip if not calibrated)
                     if None not in self.means.values() and None not in self.sds.values():
-                        ### REMOVE RAW ###
-                        self.check_alerts(values, raw)
-                        ### REMOVE RAW ###
+                        self.check_alerts(values)
                     else:
                         remaining_time = self.calculation_interval - (time.time() - self.last_calculation_time)
                         logging.info(f'Calibrating... Time remaining: {remaining_time:.0f}s')
