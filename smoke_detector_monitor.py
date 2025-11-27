@@ -8,6 +8,7 @@ import json
 import sqlite3
 from datetime import datetime
 import logging
+import os
 
 # Set up logging
 logging.basicConfig(
@@ -347,7 +348,12 @@ class SmokeDetectorMonitor:
                 # Check for scheduled restart
                 if time.time() >= self.restart_time:
                     logging.info("Restarting monitoring script to prevent error excess.")
-                    return
+                    if self.arduino_serial:
+                        self.arduino_serial.close()
+                        self.update_setting('monitoring_active', 'false')
+                        
+                        # Restart the script
+                        os.execv(sys.executable, ['python'] + sys.argv)
 
                 # Reload settings periodically
                 self.settings = self.load_settings()
