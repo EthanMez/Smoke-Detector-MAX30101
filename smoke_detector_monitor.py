@@ -18,7 +18,7 @@ class SmokeDetectorChannel:
         self.channel = channel_number
         self.db_path = db_path
         self.settings = settings
-        self.calculation_interval = 3 * 60  # 3 minutes
+        self.calculation_interval = 5 * 60  # 5 minutes
         
         # Data storage
         self.saved_values = {'R': [], 'G': [], 'IR': []}
@@ -113,7 +113,7 @@ class SmokeDetectorChannel:
         cursor.execute('''
             INSERT INTO alerts (atlaspc, channel, alert_type, message, R_value, G_value, IR_value, 
                               R_zscore, G_zscore, IR_zscore) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (self.atlaspc, self.channel, alert_type, message, values.get('R'), values.get('G'), values.get('IR'),
               z_scores.get('R'), z_scores.get('G'), z_scores.get('IR')))
         conn.commit()
@@ -222,9 +222,9 @@ class SmokeDetectorMonitor:
         # Dictionary to store channel objects
         self.channels = {}
         self.atlaspc_channel_map = {
-            1: 20, # channel 1 -> atlaspc20
+            0: 20, # channel 0 -> atlaspc20
             2: 21, # channel 2 -> atlaspc21
-            3: 22, # channel 3 -> atlaspc22
+            7: 22, # channel 7 -> atlaspc22
         }
         
     def setup_database(self):
