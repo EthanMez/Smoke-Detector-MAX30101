@@ -4,21 +4,22 @@ import sys
 import serial
 import smtplib
 from email.mime.text import MIMEText
-import json
+import yaml
 import sqlite3
 from datetime import datetime
 import logging
 import os
+import argparse
 
 class SmokeDetectorChannel:
     """Manages data and operations for a single smoke detector channel"""
     
-    def __init__(self, atlaspc, channel_number, db_path, settings):
+    def __init__(self, config, atlaspc, channel_number, db_path, settings):
         self.atlaspc = atlaspc
         self.channel = channel_number
         self.db_path = db_path
         self.settings = settings
-        self.calculation_interval = 5 * 60  # 5 minutes
+        self.calculation_interval = config['calculation_interval'] * 60  # convert minutes to seconds
         
         # Data storage
         self.saved_values = {'R': [], 'G': [], 'IR': []}
@@ -207,11 +208,12 @@ class SmokeDetectorChannel:
 class SmokeDetectorMonitor:
     """Main monitor that coordinates multiple smoke detector channels"""
     
-    def __init__(self, arduino_port="/dev/cu.usbmodem101", db_path="smoke_detector.db"):
-        self.arduino_port = arduino_port
+    def __init__(self, config, db_path="smoke_detector.db"):
+        self.config = config
+        self.arduino_port = config['arduino_port']
         self.db_path = db_path
         self.arduino_serial = None
-        self.restart_time = time.time() + 10*3600  # Restart every 10 hours
+        self.restart_time = time.time() + config['restart_time']*3600  # Restart every 10 hours
         
         # Initialize database
         self.setup_database()
@@ -221,11 +223,7 @@ class SmokeDetectorMonitor:
         
         # Dictionary to store channel objects
         self.channels = {}
-        self.atlaspc_channel_map = {
-            0: 20, # channel 0 -> atlaspc20
-            2: 21, # channel 2 -> atlaspc21
-            7: 22, # channel 7 -> atlaspc22
-        }
+        self.atlaspc_channel_map = config['atlaspc_channel_map']
         
     def setup_database(self):
         """Initialize SQLite database for data storage"""
@@ -341,7 +339,7 @@ class SmokeDetectorMonitor:
     def get_or_create_channel(self, atlaspc, channel_number):
         """Get existing channel or create new one"""
         if channel_number not in self.channels:
-            self.channels[channel_number] = SmokeDetectorChannel(atlaspc, channel_number, self.db_path, self.settings)
+            self.channels[channel_number] = SmokeDetectorChannel(self.config, atlaspc, channel_number, self.db_path, self.settings)
         return self.channels[channel_number]
     
     def connect_arduino(self):
@@ -465,7 +463,7 @@ class SmokeDetectorMonitor:
                     try: 
                         atlaspc = self.atlaspc_channel_map[channel_number]
                     except KeyError:
-                        raise ValueError(f"Channel {channel_number} is not mapped in an atlaspc.")
+                        raise ValueError(f"Channel {channel_number} is not mapped to an atlaspc.")
                     
                     # Get or create channel
                     channel = self.get_or_create_channel(atlaspc, channel_number)
@@ -502,5 +500,12 @@ class SmokeDetectorMonitor:
             print("Monitoring stopped")
 
 if __name__ == "__main__":
-    monitor = SmokeDetectorMonitor()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default='config.yaml', help='Path to config file')
+    args = parser.parse_args()
+
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
+    monitor = SmokeDetectorMonitor(config)
+
     monitor.run()

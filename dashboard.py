@@ -15,75 +15,75 @@ st.set_page_config(
 DB_PATH = "smoke_detector.db"
 
 @st.cache_data(ttl=1)  # Cache for 1 second
-def get_active_channels():
-    """Get list of active channels"""
+def get_active_atlaspcs():
+    """Get list of active atlaspcs"""
     try:
         conn = sqlite3.connect(DB_PATH)
         query = '''
-            SELECT DISTINCT channel 
+            SELECT DISTINCT atlaspc 
             FROM readings 
             WHERE datetime(timestamp) > datetime('now', '-24 hours')
-            ORDER BY channel
+            ORDER BY atlaspc
         '''
         df = pd.read_sql_query(query, conn)
         conn.close()
-        return df['channel'].tolist() if not df.empty else []
+        return df['atlaspc'].tolist() if not df.empty else []
     except Exception as e:
         st.error(f"Database error: {e}")
         return []
 
 @st.cache_data(ttl=1)  # Cache for 1 second
-def get_recent_data(channel, hours=10):
-    """Get recent readings from database for a specific channel"""
+def get_recent_data(atlaspc, hours=10):
+    """Get recent readings from database for a specific atlaspc"""
     try:
         conn = sqlite3.connect(DB_PATH)
         query = '''
-            SELECT timestamp, channel, R, G, IR 
+            SELECT timestamp, atlaspc, R, G, IR 
             FROM readings 
-            WHERE channel = ? 
+            WHERE atlaspc = ? 
             AND datetime(timestamp) > datetime('now', '-{} hours')
             ORDER BY timestamp DESC
             LIMIT 10000
         '''.format(hours)
-        df = pd.read_sql_query(query, conn, params=(channel,))
+        df = pd.read_sql_query(query, conn, params=(atlaspc,))
         conn.close()
         if not df.empty:
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize('UTC').dt.tz_convert('America/New_York')
         return df
     except Exception as e:
         st.error(f"Database error: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=30)  # Cache for 30 seconds
-def get_current_stats(channel):
-    """Get current statistics for a specific channel"""
+def get_current_stats(atlaspc):
+    """Get current statistics for a specific atlaspc"""
     try:
         conn = sqlite3.connect(DB_PATH)
         query = '''
             SELECT * FROM statistics 
-            WHERE channel = ?
+            WHERE atlaspc = ?
             ORDER BY timestamp DESC 
             LIMIT 1
         '''
-        df = pd.read_sql_query(query, conn, params=(channel,))
+        df = pd.read_sql_query(query, conn, params=(atlaspc,))
         conn.close()
         return df
     except:
         return pd.DataFrame()
 
 @st.cache_data(ttl=5)  # Cache for 5 seconds
-def get_recent_alerts(channel=None, limit=20):
-    """Get recent alerts, optionally filtered by channel"""
+def get_recent_alerts(atlaspc=None, limit=20):
+    """Get recent alerts, optionally filtered by atlaspc"""
     try:
         conn = sqlite3.connect(DB_PATH)
-        if channel is not None:
+        if atlaspc is not None:
             query = '''
                 SELECT * FROM alerts 
-                WHERE channel = ?
+                WHERE atlaspc = ?
                 ORDER BY timestamp DESC 
                 LIMIT ?
             '''
-            df = pd.read_sql_query(query, conn, params=(channel, limit))
+            df = pd.read_sql_query(query, conn, params=(atlaspc, limit))
         else:
             query = '''
                 SELECT * FROM alerts 
@@ -93,7 +93,7 @@ def get_recent_alerts(channel=None, limit=20):
             df = pd.read_sql_query(query, conn, params=(limit,))
         conn.close()
         if not df.empty:
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize('UTC').dt.tz_convert('America/New_York')
         return df
     except:
         return pd.DataFrame()
@@ -124,7 +124,7 @@ def update_setting(key, value):
         return False
 
 # Main interface
-st.title("🚨 Smoke Detector Monitoring Dashboard")
+st.title("Monitoring Dashboard")
 
 # Sidebar controls
 st.sidebar.title("Control Panel")
@@ -181,39 +181,24 @@ if auto_shutdown:
 st.sidebar.subheader("Display Settings")
 hours_to_display = st.sidebar.slider("Hours of data to display", 1, 24, 10)
 
-# Get active channels
-active_channels = get_active_channels()
+# Get active atlaspcs
+active_atlaspcs = get_active_atlaspcs()
 
-if not active_channels:
-    st.warning("No active channels detected. Make sure the monitoring script is running and sensors are connected.")
+if not active_atlaspcs:
+    st.warning("No active atlaspcs detected. Make sure the monitoring script is running and sensors are connected.")
 else:
-    # Display overview of all channels
-    st.subheader(f"Active Channels: {len(active_channels)}")
-    
-    # Create columns for channel overview
-    overview_cols = st.columns(len(active_channels))
-    for idx, channel in enumerate(active_channels):
-        with overview_cols[idx]:
-            df = get_recent_data(channel, hours=1)
-            if not df.empty:
-                latest = df.iloc[0]
-                st.metric(
-                    f"Channel {channel}",
-                    f"R:{latest.get('R', 'N/A')} G:{latest.get('G', 'N/A')} IR:{latest.get('IR', 'N/A')}",
-                    delta=None
-                )
-            else:
-                st.metric(f"Channel {channel}", "No data")
+    # Display overview of all atlaspcs
+    st.subheader(f"Active Channels: {len(active_atlaspcs)}")
     
     st.divider()
     
-    # Display each channel in detail
-    for channel in active_channels:
-        st.header(f"Channel {channel}")
+    # Display each atlaspc in detail
+    for atlaspc in active_atlaspcs:
+        st.header(f"atlaspc{atlaspc}")
         
-        df = get_recent_data(channel, hours=hours_to_display)
-        stats_df = get_current_stats(channel)
-        alerts_df = get_recent_alerts(channel=channel, limit=10)
+        df = get_recent_data(atlaspc, hours=hours_to_display)
+        stats_df = get_current_stats(atlaspc)
+        alerts_df = get_recent_alerts(atlaspc=atlaspc, limit=10)
         
         if not df.empty:
             # Current readings
@@ -231,30 +216,30 @@ else:
             
             # Statistics
             if not stats_df.empty:
-                st.subheader(f"Channel {channel} Statistics")
+                st.subheader(f"Statistics")
                 stats = stats_df.iloc[0]
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    st.write("**Red Channel**")
+                    st.write("Red")
                     if pd.notna(stats.get('R_mean')):
-                        st.write(f"Mean: {stats['R_mean']:.2f}")
-                        st.write(f"Std Dev: {stats['R_std']:.2f}")
+                        st.write(r"$\mu$: "+f"{stats['R_mean']:.2f}")
+                        st.write(r"$\sigma$: "+f"{stats['R_std']:.2f}")
                 
                 with col2:
-                    st.write("**Green Channel**")
+                    st.write("Green")
                     if pd.notna(stats.get('G_mean')):
-                        st.write(f"Mean: {stats['G_mean']:.2f}")
-                        st.write(f"Std Dev: {stats['G_std']:.2f}")
+                        st.write(r"$\mu$: "+f"{stats['G_mean']:.2f}")
+                        st.write(r"$\sigma$: "+f"{stats['G_std']:.2f}")
                 
                 with col3:
-                    st.write("**IR Channel**")
+                    st.write("IR")
                     if pd.notna(stats.get('IR_mean')):
-                        st.write(f"Mean: {stats['IR_mean']:.2f}")
-                        st.write(f"Std Dev: {stats['IR_std']:.2f}")
+                        st.write(r"$\mu$: "+f"{stats['IR_mean']:.2f}")
+                        st.write(r"$\sigma$: "+f"{stats['IR_std']:.2f}")
             
-            # Time series plot for this channel
-            st.subheader(f"Channel {channel} - Readings Over Time")
+            # Time series plot for this atlaspc
+            st.subheader(f"Readings")
             
             # Prepare data for plotting
             df_plot = df.melt(id_vars=['timestamp'], 
@@ -264,20 +249,17 @@ else:
             
             chart = alt.Chart(df_plot).mark_line().encode(
                 x=alt.X('timestamp:T', title='Time'),
-                y=alt.Y('Value:Q', title='Reading Value'),
+                y=alt.Y('Value:Q', title= 'Value [a.u.]'),
                 color=alt.Color('Sensor:N', 
                                scale=alt.Scale(domain=['R', 'G', 'IR'], 
                                              range=['red', 'green', 'purple']))
-            ).properties(
-                height=300,
-                title=f"Channel {channel} Smoke Detector Readings"
-            ).interactive()
+            ).properties(height=300).interactive()
             
             st.altair_chart(chart, use_container_width=True)
             
-            # Channel-specific alerts
+            # atlaspc-specific alerts
             if not alerts_df.empty:
-                st.subheader(f"Channel {channel} - Recent Alerts")
+                st.subheader(f"atlaspc{atlaspc} - Recent Alerts")
                 
                 for _, alert in alerts_df.iterrows():
                     alert_type = alert['alert_type']
@@ -306,34 +288,10 @@ else:
                                     st.write(f"G: {alert['G_zscore']:.2f}")
                                     st.write(f"IR: {alert['IR_zscore']:.2f}")
         else:
-            st.warning(f"No recent data available for Channel {channel}.")
+            st.warning(f"No recent data available for atlaspc{atlaspc}.")
         
         st.divider()
-    
-    # All alerts summary at the bottom
-    all_alerts_df = get_recent_alerts(limit=20)
-    if not all_alerts_df.empty:
-        st.header("All Recent Alerts (All Channels)")
-        
-        # Group by channel for summary
-        alert_summary = all_alerts_df.groupby('channel').size().reset_index(name='count')
-        st.write("**Alert Count by Channel:**")
-        st.dataframe(alert_summary, hide_index=True)
-        
-        # Show details
-        with st.expander("Show all alert details"):
-            for _, alert in all_alerts_df.iterrows():
-                alert_type = alert['alert_type']
-                channel = alert['channel']
-                timestamp = alert['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
-                
-                if alert_type == 'CRITICAL':
-                    st.error(f"**Ch {channel} - {timestamp} - {alert_type}**: {alert['message']}")
-                elif alert_type == 'WARNING':
-                    st.warning(f"**Ch {channel} - {timestamp} - {alert_type}**: {alert['message']}")
-                else:
-                    st.info(f"**Ch {channel} - {timestamp} - {alert_type}**: {alert['message']}")
 
-# Auto-refresh every 5 seconds
-time.sleep(5)
-st.rerun()
+# Refresh info
+st.sidebar.divider()
+st.sidebar.info("💡 Data refreshes automatically due to caching. Use browser refresh to update the view.")
