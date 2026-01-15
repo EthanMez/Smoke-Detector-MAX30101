@@ -1,7 +1,7 @@
-arduino_port: "/dev/cu.usbmodem101"
+arduino_port: "/dev/ttyACM0"
 atlaspc_channel_map:
   0: 20 # channel 0 -> atlaspc20
   2: 21 # channel 2 -> atlaspc21
   7: 22 # channel 7 -> atlaspc22
 restart_time: 10 # hours
-calculation_interval: 1 # minutes
+calculation_interval: 5 # minutes

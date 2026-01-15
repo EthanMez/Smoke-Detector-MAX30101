@@ -1,3 +1,4 @@
 # Ignore log files and database files
 *.log
 *.db
+*.yaml
