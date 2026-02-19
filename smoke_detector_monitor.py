@@ -98,13 +98,13 @@ class SmokeDetectorChannel:
         """Get remaining time for calibration"""
         return self.calculation_interval - (time.time() - self.last_calculation_time)
     
-    def calculate_z_scores(self, values):
+    def calculate_z_scores(self, values_window):
         """Calculate z-scores for current values"""
         z_scores = {}
         for key in ['R', 'G', 'IR']:
-            if (key in values and self.means[key] is not None 
+            if (key in values_window and self.means[key] is not None 
                 and self.sds[key] is not None and self.sds[key] != 0):
-                z_scores[key] = (values[key] - self.means[key]) / self.sds[key]
+                z_scores[key] = (np.array(values_window[key]) - float(self.means[key])) / float(self.sds[key])
         return z_scores
     
     def save_alert(self, alert_type, message, values, z_scores):
@@ -160,41 +160,52 @@ class SmokeDetectorChannel:
             self.logger.error(f"Failed to shutdown power supply: {e}")
             return False
     
-    def check_alerts(self, values):
+    def check_alerts(self, values_window):
         """Check for alert conditions and take appropriate action"""
-        if not self.is_calibrated():
+        if not self.is_calibrated() or not all(key in values_window for key in ['R', 'G', 'IR']):
             return
         
-        z_scores = self.calculate_z_scores(values)
-        conditions = {}
+        if not all(len(values_window[key]) == 3 for key in ['R', 'G', 'IR']):
+            return
+        
+        z_scores = self.calculate_z_scores(values_window)
+        z_scores_rounded = {k: [f"{z:.2f}" for z in v] for k, v in z_scores.items()}
+        danger_conditions = {}
+        false_positives = {}
         
         for key in ['R', 'G', 'IR']:
-            if key in z_scores:
-                conditions[key] = abs(z_scores[key]) > 5  # only 5 sigma deviation will trigger alerts
+            # only a 5 sigma deviation on the middle and one of the adjacent readings will trigger an alert
+            danger_conditions[key] = abs(z_scores[key][1]) > 5 and (abs(z_scores[key][0]) > 5 or abs(z_scores[key][2]) > 5)
+            false_positives[key] = abs(z_scores[key][1]) > 5 and abs(z_scores[key][0]) <= 5 and abs(z_scores[key][2]) <= 5
+
+        if any(false_positives.values()):
+            self.logger.info(f"False positive: {values_window} | Z-scores: {z_scores}")
+            for key in self.saved_values:
+                self.saved_values[key].pop(-2)
         
         # WARNING - any sensor triggered
-        if any(conditions.values()):
+        if any(danger_conditions.values()):
             message = f'Concerning smoke levels detected on atlaspc{self.atlaspc}'
-            self.save_alert('WARNING', message, values, z_scores)
+            self.save_alert('WARNING', message, values_window, z_scores)
             
             warning_message = (f'Concerning smoke levels have been detected in the clean room on atlaspc{self.atlaspc}. '
                              f'The burn-in has NOT been stopped.\n\n'
-                             f'RED values are {z_scores.get("R", np.nan):.2f} standard deviations from the mean.\n'
-                             f'GREEN values are {z_scores.get("G", np.nan):.2f} standard deviations from the mean.\n'
-                             f'IR values are {z_scores.get("IR", np.nan):.2f} standard deviations from the mean.')
+                             f'RED values are {z_scores_rounded.get("R", [])} standard deviations from the mean.\n'
+                             f'GREEN values are {z_scores_rounded.get("G", [])} standard deviations from the mean.\n'
+                             f'IR values are {z_scores_rounded.get("IR", [])} standard deviations from the mean.')
 
             self.send_email(warning_message, f'SMOKE LEVEL WARNING - atlaspc{self.atlaspc}', priority='2')
-            self.logger.warning(f"SMOKE WARNING: {values} | Z-scores: {z_scores}")
+            self.logger.warning(f"SMOKE WARNING: {values_window} | Z-scores: {z_scores}")
         
         # CRITICAL - all sensors triggered
-        if all(conditions.get(key, False) for key in ['R', 'G', 'IR']):
+        if all(danger_conditions.get(key, False) for key in ['R', 'G', 'IR']):
             message = f'DANGEROUS smoke levels on atlaspc{self.atlaspc} - Burn-in stopped!'
-            self.save_alert('CRITICAL', message, values, z_scores)
+            self.save_alert('CRITICAL', message, values_window, z_scores)
             
             stop_message = (f'Dangerous smoke levels have been detected in the clean room on atlaspc{self.atlaspc}.\n\n'
-                          f'RED values are {z_scores.get("R", np.nan):.2f} standard deviations from the mean.\n'
-                          f'GREEN values are {z_scores.get("G", np.nan):.2f} standard deviations from the mean.\n'
-                          f'IR values are {z_scores.get("IR", np.nan):.2f} standard deviations from the mean.\n'
+                          f'RED values are {z_scores_rounded.get("R", [])} standard deviations from the mean.\n'
+                          f'GREEN values are {z_scores_rounded.get("G", [])} standard deviations from the mean.\n'
+                          f'IR values are {z_scores_rounded.get("IR", [])} standard deviations from the mean.\n'
                           f'The burn-in has been stopped automatically for this channel.')
 
             self.send_email(stop_message, f'BURN-IN STOPPED - CRITICAL ALERT - ATLASPC{self.atlaspc}', priority='1')
@@ -202,8 +213,7 @@ class SmokeDetectorChannel:
             if self.settings.get('auto_shutdown_enabled') == 'true':
                 self.shutdown_power_supply()
 
-            self.logger.critical(f"CRITICAL SMOKE ALERT: {values} | Z-scores: {z_scores}")
-
+            self.logger.critical(f"CRITICAL SMOKE ALERT: {values_window} | Z-scores: {z_scores}")
 
 class SmokeDetectorMonitor:
     """Main monitor that coordinates multiple smoke detector channels"""
@@ -468,9 +478,6 @@ class SmokeDetectorMonitor:
                     # Get or create channel
                     channel = self.get_or_create_channel(atlaspc, channel_number)
                     
-                    # Save reading
-                    self.save_reading(atlaspc, channel_number, values)
-                    
                     # Add reading to channel
                     channel.add_reading(values)
                     
@@ -482,10 +489,15 @@ class SmokeDetectorMonitor:
                     
                     # Check for alerts or log calibration status
                     if channel.is_calibrated():
-                        channel.check_alerts(values)
+                        # Alerts are calculated over a window of the last 3 readings
+                        values_window = {k: v[-3:] for k, v in channel.saved_values.items() if len(v) >= 3}
+                        channel.check_alerts(values_window)
                     else:
                         remaining_time = channel.get_remaining_calibration_time()
                         channel.logger.info(f'Calibrating... Time remaining: {remaining_time:.0f}s')
+
+                    # Save reading
+                    self.save_reading(atlaspc, channel_number, values)
                 
                 time.sleep(1)  # 1 second between readings
                 

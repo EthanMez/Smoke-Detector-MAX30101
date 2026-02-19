@@ -241,15 +241,34 @@ else:
             # Time series plot for this atlaspc
             st.subheader(f"Readings")
             
+            # Calculate y-axis range based on statistics
+            y_min, y_max = None, None
+            if not stats_df.empty:
+                stats = stats_df.iloc[0]
+                bounds = []
+                for mean_key, std_key in [('R_mean', 'R_std'), ('G_mean', 'G_std'), ('IR_mean', 'IR_std')]:
+                    if pd.notna(stats.get(mean_key)) and pd.notna(stats.get(std_key)):
+                        mu, sigma = stats[mean_key], stats[std_key]
+                        bounds.append(mu - 5 * sigma)
+                        bounds.append(mu + 5 * sigma)
+                if bounds:
+                    y_min = min(bounds)
+                    y_max = max(bounds)
+            
             # Prepare data for plotting
             df_plot = df.melt(id_vars=['timestamp'], 
                              value_vars=['R', 'G', 'IR'],
                              var_name='Sensor', 
                              value_name='Value')
             
+            # Build y-axis encoding with or without scale domain
+            y_encoding = alt.Y('Value:Q', title='Value [a.u.]')
+            if y_min is not None and y_max is not None:
+                y_encoding = alt.Y('Value:Q', title='Value [a.u.]', scale=alt.Scale(domain=[y_min, y_max]))
+            
             chart = alt.Chart(df_plot).mark_line().encode(
                 x=alt.X('timestamp:T', title='Time'),
-                y=alt.Y('Value:Q', title= 'Value [a.u.]'),
+                y=y_encoding,
                 color=alt.Color('Sensor:N', 
                                scale=alt.Scale(domain=['R', 'G', 'IR'], 
                                              range=['red', 'green', 'purple']))
