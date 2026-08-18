@@ -21,7 +21,7 @@ python smoke_detector_monitor.py --config config.yaml
 This will begin monitoring, saving the data for later viewing into a `smoke_detector.db` file. A separate log file will be created for each active channel. 
 
 The config file is structured as follows: 
-```json
+```yaml
 arduino_port: "/dev/ttyACM0"
 atlaspc_channel_map:
   0: 20 # channel 0 -> atlaspc20 
